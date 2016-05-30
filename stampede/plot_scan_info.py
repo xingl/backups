@@ -1,0 +1,349 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+import os
+import numpy as np
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+from ParIO import *
+from matplotlib.mlab import griddata
+import optparse as op
+#"""
+#Plots data from scan_info.dat (created by scan_info.py).
+#Assumes a scan in ky and one of the following: kx_center or x0.
+#The routine can handle a ky-dependent kx_center scan.  
+#An x0 scan is assumed to be ky-independent.
+#"""
+
+parser=op.OptionParser(description='Plots data from scan_info.dat.')
+options,args=parser.parse_args()
+if len(args)!=1:
+    exit("""
+Please include scan number as argument (e.g., 0001)."
+    \n""")
+suffix = args[0]
+#os.chdir('scanfiles'+suffix)
+
+
+
+
+data = np.genfromtxt('scan_info.dat')
+
+par = Parameters()
+par.Read_Pars('parameters'+'_'+suffix)
+pars = par.pardict
+
+numscan_tot = 1
+
+def filter_numerical_modes(data_in,pars):
+    ntot = 1
+    dz = 2.0/float(pars['nz0'])
+    if data_in[7] < 2.0*dz:
+        data_in[4] = np.nan
+        data_in[5] = np.nan
+        data_in[10] = np.nan
+    elif data_in[4] < -1.0:
+        data_in[4] = np.nan 
+        data_in[5] = np.nan
+        data_in[10] = np.nan
+    return data_in
+
+def classify_modes(data_in,pars):
+    if 'ExBrate' in pars and pars['ExBrate'] != 0.0:
+        wExBshear = True
+    else:
+        wExBshear = False
+    ntot = 1
+    modes = []
+    epar_threshold = 0.2
+    epar_threshold2 = 0.6
+    if 'x_local' in pars and not pars['x_local']:
+        epar_threshold = 0.4
+        epar_threshold2 = 0.7
+    dz = 2.0/float(pars['nz0'])
+    print "epar_threshold",epar_threshold
+    print "epar_threshold2",epar_threshold2
+    for i in range(ntot):
+        #Test for numerical modes (i.e. grid-scale z)
+        if data_in[7] <= 2*dz:
+            if data_in[8]/data_in[9] > 1.0:
+                #Numerical microtearing
+                modes.append('NMTM') 
+            else:
+                #Numerical ballooning parity
+                modes.append('NBP')  
+        #Test for MTM
+        #Negative frequency
+        #Mostly tearing parity
+        #Mostly EM transport
+        if data_in[10] > 0.5 and \
+           data_in[8] / data_in[9] >= 0.8 and \
+           len(modes) == i:
+            if not wExBshear:
+                if data_in[5] < 0.0:
+                    modes.append('MTM')  
+            else:
+                modes.append('MTM')  
+              
+        #Test for KBM
+        #Positive frequency
+        #Peaked mode structure
+        #Mostly ballooning parity
+        #Epar cancelation 
+        if data_in[8] / data_in[9] < 0.1 and \
+           data_in[11] < epar_threshold and \
+           len(modes) == i:
+            if not wExBshear:
+                if data_in[5] > 0.0:
+                    modes.append('KBM')  
+            else:
+                modes.append('KBM')  
+        if data_in[11] < epar_threshold2 and \
+           len(modes) == i:
+            modes.append('ID')
+        if len(modes) == i:
+            modes.append('other')
+    print "len(modes)",len(modes)
+    for i in range(len(modes)):
+        print i+1,modes[i]
+    return modes
+
+def get_grids(data_in):
+    numscan_tot = 1
+    num_col = len(data_in[:])
+    ky_array = np.empty(0)
+    x0_array = np.empty(0)
+    for i in range(numscan_tot):
+        if data[0] not in ky_array:
+            ky_array = np.append(ky_array,data[0])
+        if data[1] not in x0_array:
+            x0_array = np.append(x0_array,data[1])
+
+    nkxc = numscan_tot/(len(ky_array)*len(x0_array)) 
+    kxc_array = np.empty((len(ky_array),nkxc))
+    kxc_array[:,:] = -1.0
+    fill_index = np.empty(len(ky_array))
+    fill_index[:] = -1
+    for i in range(numscan_tot):
+        kyind = np.argmin(abs(data_in[0]-ky_array))
+        if data_in[2] not in kxc_array[kyind,:]:
+            fill_index[kyind] += 1
+            kxc_array[kyind,fill_index[kyind]] = data_in[2]
+
+    print 'fill_index',fill_index
+    return ky_array, x0_array, kxc_array
+
+def get_kxc_array(data_in,ky_array,x0_array):
+    numscan_tot = 1
+    num_col = len(data_in[:])
+    
+
+def get_ky_arrays(data_in):
+    numscan_tot = 1
+    num_col = len(data_in[:])
+    ky_array = np.empty(0)
+    for i in range(numscan_tot):
+        if data[0] not in ky_array:
+            ky_array = np.append(ky_array,data[0])
+    data_ky = np.empty((len(ky_array),numscan_tot/len(ky_array),num_col))
+    index_ky = np.empty(len(ky_array),dtype='int')
+    index_ky[:] = -1
+    for i in range(numscan_tot):
+        index = np.argmin(abs(ky_array-data[0]))
+        index_ky[index] += 1
+        data_ky[index,index_ky[index],:] = data[:]
+    
+    return data_ky 
+
+#def get_x0_arrays(data_in):
+#    numscan_tot = len(data_in[0])
+#    num_col = len(data_in[0])
+#    x0_array = np.empty(0)
+#    for i in range(numscan_tot):
+#        if data[1] not in x0_array:
+#            x0_array = np.append(x0_array,data[1])
+#    data_x0 = np.empty((len(x0_array),numscan_tot/len(x0_array),num_col))
+#    index_x0 = np.empty(len(x0_array),dtype='int')
+#    index_x0[:] = -1
+#    for i in range(numscan_tot):
+#        index = np.argmin(abs(x0_array-data[1]))
+#        index_x0[index] += 1
+#        data_x0[index,index_x0[index],:] = data[:]
+#    return x0_array, data_x0 
+
+print np.shape(data)
+ky_array, x0_array, kxc_array = get_grids(data)
+data_ky = get_ky_arrays(data)
+
+modes = classify_modes(data,pars)
+
+if len(x0_array) > 1:
+    plt.contourf(x0_array,ky_array,data_ky[:,:,4],50)
+    plt.colorbar()
+    for i in range(len(data[0])):
+        if modes[i] == 'MTM':
+            mark = 'x'
+            col = 'red'
+        elif modes[i] == 'KBM':
+            mark = 'o'
+            col = 'black'
+        elif modes[i] == 'ID':
+            mark = 'o'
+            col = 'magenta'
+        elif modes[i] == 'NMTM' or modes[i] == 'NBP':
+            mark = '+'
+            col = 'orange'
+        else:
+            mark = '+'
+            col = 'green'
+        plt.scatter(data[1],data[0],marker=mark,color=col)
+    plt.show()
+
+    plt.contourf(x0_array,ky_array,data_ky[:,:,11],50)
+    plt.colorbar()
+    plt.show()
+
+    fig=plt.figure()
+    ax = fig.add_subplot(111,projection='3d')
+    for i in range(len(ky_array)):
+        ax.plot(x0_array[:],data_ky[i,:,0],data_ky[i,:,4],color = 'red',marker = 'x')
+    #for i in range(len(x0_array)):
+    #    ax.plot(data_x0[i,:,1],ky_array[:],data_x0[i,:,3],color = 'blue',marker = 'x')
+    ax.set_xlabel(r'$\rho_{tor}$')
+    ax.set_ylabel(r'$k_y \rho_s$')
+    ax.set_zlabel(r'$\gamma (c_s/a)$')
+    plt.show()
+
+    fig=plt.figure()
+    ax = fig.add_subplot(111,projection='3d')
+    for i in range(len(ky_array)):
+        ax.plot(x0_array[:],data_ky[i,:,0],data_ky[i,:,11],color = 'red',marker = 'x')
+    #for i in range(len(x0_array)):
+    #    ax.plot(data_x0[i,:,1],ky_array[:],data_x0[i,:,10],color = 'blue',marker = 'x')
+    ax.set_xlabel(r'$\rho_{tor}$')
+    ax.set_ylabel(r'$k_y \rho_s$')
+    #ax.set_zlabel(r'$\gamma (c_s/a)$')
+    plt.show()
+
+dz = 2.0/float(pars['nz0'])
+if len(kxc_array[0,:]) > 1:
+
+    data = filter_numerical_modes(data,pars)    
+
+    kxcmax = kxc_array[-1,-1]
+    kymax = ky_array[-1]
+    kxgrid = np.arange(100)/99.0*kxcmax
+    kygrid = np.arange(100)/99.0*kymax
+#    plt.plot(kxgrid,'x')
+#    plt.plot(kygrid,'x')
+#    plt.show()
+#    zi = griddata(data[:,2],data[:,0],data[:,4],kxgrid,kygrid,interp='linear')
+#    z2 = griddata(data[:,2],data[:,0],data[:,10],kxgrid,kygrid,interp='linear')
+    #plt.contourf(kxgrid,kygrid,zi,50,cmap=plt.cm.RdYlBu)
+#    plt.contourf(kxgrid,kygrid,zi,50)
+#    plt.colorbar()
+#    for i in range(len(data[:,0])):
+#        if modes[i] == 'MTM':
+#            mark = 'x'
+#            col = 'red'
+#        elif modes[i] == 'KBM':
+#            mark = 'o'
+#            col = 'black'
+#        elif modes[i] == 'ID':
+#            mark = 'o'
+#            col = 'magenta'
+#        elif modes[i] == 'NMTM' or modes[i] == 'NBP':
+#            mark = '+'
+#            col = 'orange'
+#        else:
+#            mark = '+'
+#            col = 'green'
+#        plt.scatter(data[i,2],data[i,0],marker=mark,color=col)
+#    plt.xlabel(r'$k_{x,c} \rho_s$',size=18)
+#    plt.ylabel(r'$k_{y} \rho_s$',size=18)
+
+#    plt.show()
+
+    #Find maximum gr per ky
+    max_gr_ky = np.zeros(len(ky_array))
+    max_gr_ky_fr = np.zeros(len(ky_array))
+    modes_ky = [None]*len(ky_array)
+    for i in range(len(modes_ky)):
+        modes_ky[i] = 'NBP'
+    for i in range(len(data[0])):
+        kyind = np.argmin(abs(ky_array-data[i,0]))
+        if data[i,4] > max_gr_ky[kyind]:
+            max_gr_ky[kyind] = data[i,4]
+            max_gr_ky_fr[kyind] = data[i,5]
+            modes_ky[kyind] = modes[i]
+
+    f=open('gamma_omega_ky.dat','w')
+    f.write('# x0 = '+str(pars['x0'])+'\n')
+    f.write('# diagdir ='+pars['diagdir']+'\n')
+    np.savetxt(f,np.column_stack((ky_array,max_gr_ky,max_gr_ky_fr)))
+    f.close()
+    
+    plt.plot(ky_array,max_gr_ky)
+    f=open('modes_ky.dat','w')
+    f.write('# x0 = '+str(pars['x0'])+'\n')
+    f.write('# diagdir ='+pars['diagdir']+'\n')
+    for i in range(len(ky_array)):
+        if modes_ky[i] == 'MTM':
+            mark = 'x'
+            col = 'red'
+        elif modes_ky[i] == 'KBM':
+            mark = 'o'
+            col = 'black'
+        elif modes_ky[i] == 'ID':
+            mark = (5,2,0)
+            col = 'magenta'
+        elif modes_ky[i] == 'NMTM' or modes_ky[i] == 'NBP':
+            mark = '+'
+            col = 'orange'
+        else:
+            mark = '+'
+            col = 'green'
+        plt.plot(ky_array[i],max_gr_ky[i],color=col,marker=mark,markeredgewidth=2,markersize=5)
+        #plt.plot(ky_array[i],max_gr_ky_fr[i],color=col,marker=mark,markeredgewidth=2,markersize=5)
+        print "modes_ky[i]",modes_ky[i]
+        f.write(str(ky_array[i])+'\t'+modes_ky[i]+'\n')
+      
+    f.close()
+    plt.xlabel(r'$k_y \rho_s$',size=18)
+    plt.ylabel(r'$\gamma (c_s/a)$',size=18)
+    plt.show()
+    
+
+if 'x_local' in pars and not pars['x_local']:
+
+    data = filter_numerical_modes(data,pars)    
+    
+    f=open('modes_ky.dat','w')
+    f.write('# x0 = '+str(pars['x0'])+'\n')
+    f.write('# diagdir ='+pars['diagdir']+'\n')
+    ky_array = data[0]
+    for i in range(len(data[0])):
+        if modes[i] == 'MTM':
+            mark = 'x'
+            col = 'red'
+        elif modes[i] == 'KBM':
+            mark = 'o'
+            col = 'black'
+        elif modes[i] == 'ID':
+            mark = (5,2,0)
+            col = 'magenta'
+        elif modes[i] == 'NMTM' or modes[i] == 'NBP':
+            mark = '+'
+            col = 'orange'
+        else:
+            mark = '+'
+            col = 'green'
+        plt.plot(ky_array[i],data[i,4],color=col,marker=mark,markeredgewidth=2,markersize=5)
+        print "modes[i]",modes[i]
+        f.write(str(ky_array[i])+'\t'+modes[i]+'\n')
+      
+    f.close()
+    plt.xlabel(r'$k_y \rho_s$',size=18)
+    plt.ylabel(r'$\gamma (c_s/a)$',size=18)
+    plt.show()
+ 
